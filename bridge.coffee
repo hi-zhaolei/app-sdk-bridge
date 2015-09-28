@@ -1,12 +1,9 @@
 ###*
- * Android SDK initialization
+ * 初始化android`s app js sdk
+ * @param  {Function} callback [description]
+ * @return {[type]}            [description]
 ###
 androidSDKInitialization = ->
-  ###*
-   * 初始化android`s app js sdk
-   * @param  {Function} callback [description]
-   * @return {[type]}            [description]
-  ###
   connectWebViewJavascriptBridge = (callback) ->
     if window.WebViewJavascriptBridge
       callback WebViewJavascriptBridge
@@ -23,33 +20,34 @@ androidSDKInitialization = ->
       responseCallback data
 
 ###*
- * ios SDK initialization
+ * 初始化ios`s app js sdk
+ * @param  {Function} callback [description]
+ * @return {[type]}            [description]
 ###
 iosSDKInitialization = -> no
-
-
 
 ###*
  * sdk数据存在列表
  * @type {Object}
 ###
 ua = navigator.userAgent
-iosSDKConig = {}
-androidSDKconfig =
+SDKConfig =
   "360around":
+    isMatch: ->
+      ua.indexOf('360around') > -1
     getVersion: ->
       data = ua.match( /360around \((.*)\)$/ )
       if data then data[1] else ''
-    sdk:
+    ios: {}
+    android:
       login:
         '*': [ 'goLogin' ]
       qifutong:
         '>=1.3.0.1001': [ 'pay' ]
 
-webSDKConfig =
-  login:
-
-    '*': "http://i.360.cn/login/wap"
+  web:
+    login:
+      '*': "http://i.360.cn/login/wap"
 
 
 
@@ -58,16 +56,20 @@ webSDKConfig =
 
 ###*
  * 客户端系统判定
- * @return {type} [description]
+ * @return {String} 客户端系统名
 ###
 systemConfirm = ->
   if ua.indexOf('iPhone') > -1
+    config = require './iosSDKConfig.coffee'
     iosSDKInitialization()
     return 'ios'
   if ua.indexOf('Android') > -1
+    config = require './androidSDKConfig.coffee'
     androidSDKInitialization()
     return 'android'
+  config = require './webSDKConfig.coffee'
   'other'
+
 
 ###*
  * 版本数据计算
@@ -78,6 +80,7 @@ versionConvert = (_ver) ->
   return 0 unless _ver
   _tmp_arr = _ver.split '.'
   ((_tmp_arr[0] - 1 ) * 10 * 10 * 10000 ) + (_tmp_arr[1] * 10 * 10000 ) + (_tmp_arr[2] * 10000 ) + _tmp_arr[3] - 1000
+
 
 ###*
  * 拼接成search数据
@@ -93,6 +96,7 @@ searchJoin = (json)->
     "?#{search.join('&')}"
   else
     ''
+
 
 ###*
  * SDK版本限制判断
@@ -116,7 +120,7 @@ limitDecision = ( limitVersion ) ->
     '~': ->
       currectArray = currectVersion.split '.'
       limitArray = limitVersion.split '.'
-      if currectArray[0] is limitArray[0] and currectArray[1] is limitArray[1] and currectArray[2] >= limitArray[2]
+      if currectArray[0] is limitArray[0] and currectArray[1] is limitArray[1]
         return versionConvert( currectVersion ) >= versionConvert limitVersion
       no
     ###
@@ -125,23 +129,23 @@ limitDecision = ( limitVersion ) ->
     '^': ->
       currectArray = currectVersion.split '.'
       limitArray = limitVersion.split '.'
-      if currectArray[0] is limitArray[0] and currectArray[1] >= limitArray[1]
+      if currectArray[0] is limitArray[0]
         return versionConvert( currectVersion ) >= versionConvert limitVersion
       no
     ###
-      匹配大于该版本的应用
+      匹配大于该版本的sdk
     ###
     '>': -> versionConvert( currectVersion ) > versionConvert limitVersion
     ###
-      匹配大于该版本的应用，包括该版本
+      匹配大于该版本的sdk，包括该版本
     ###
     '>=': -> versionConvert( currectVersion ) >= versionConvert limitVersion
     ###
-      匹配小于该版本的应用，包括该版本
+      匹配小于该版本的sdk，包括该版本
     ###
     '<=': -> versionConvert( currectVersion ) <= versionConvert( limitVersion )
     ###
-      匹配小于该版本的应用
+      匹配小于该版本的sdk
     ###
     '<': -> versionConvert( currectVersion ) < versionConvert( limitVersion )
 
@@ -149,6 +153,7 @@ limitDecision = ( limitVersion ) ->
     limitMap[ sign ]()
   else
     versionConvert( currectVersion ) is versionConvert limitVersion
+
 
 ###*
  * 调用app`s sdk
@@ -160,21 +165,24 @@ sdk = ( method, data, callback )->
     app对应的sdk配置缺失
   ###
   return console.log "#{base.app}sdk没有此功能提供" unless has method
-  methods = base.methods[ method ]
+  methods = base.config[ method ]
   ###
     遍历方法配置
   ###
   for limitVersion,method of methods
+    ###*
+     * 判断版本是否符合
+    ###
     if limitDecision limitVersion
       ###
         sdk为字符串，web或者sdk通过log通信
       ###
       if typeof method is 'string'
-        if 0 is method.indexOf 'http'
-          search = searchJoin data
-          location.href = method + searchJoin data
+        search = searchJoin data
+        if method[0] is '/' or method[...3] is 'http'
+          location.href = method + search
         else
-          console.log method + searchJoin data
+          console.log method + search
         return yes
       ###
         调用app注入的bridge调用appView
@@ -182,17 +190,18 @@ sdk = ( method, data, callback )->
       if "[object Array]" is toString.call method
         if window.WebViewJavascriptBridge
           method.push data, callback
-          WebViewJavascriptBridge.callHandler.apply WebViewJavascriptBridge, method
+          window.WebViewJavascriptBridge.callHandler.apply window.WebViewJavascriptBridge, method
         else
-          alert "无法调用native-#{n}-bridge是否加载"
+          alert "native-bridge未加载"
         return yes
       ###
         为函数的时候执行函数，传入数据
       ###
       if typeof method is 'function'
-        method data
+        method data, callback
         return yes
   no
+
 
 ###*
  * 匹配在appMap配置内是否有sdk存在
@@ -201,30 +210,39 @@ sdk = ( method, data, callback )->
 ###
 has = (sdkName) -> `sdkName in base.methods`
 
+
 ###*
  * 初始化
  * @return {[type]} [description]
 ###
 init = ->
-  temp = {}
-  for app,opt of appMap
+  temp =
+    system: systemConfirm()
+  ###*
+   * 遍历sdk配置，匹配H5容器
+  ###
+  for app,opt of SDKConfig
     fn = opt.isMatch
-    if typeof fn is 'function' and fn()
+    if fn
+      if typeof fn is 'function' and fn()
+        temp.app = app
+        break
+      if typeof fn is 'boolean' and fn
+        temp.app = app
+        break
+    else if ua.indexOf( app ) isnt -1
       temp.app = app
       break
-    if typeof fn is 'boolean' and fn
-      temp.app = app
-      break
+  ###*
+   *
+  ###
   if temp.app
-    temp.version = appMap[ temp.app ][ 'getVersion' ]()
+    temp.version = SDKConfig[ temp.app ][ 'getVersion' ]()
     temp.system = systemConfirm()
-    temp.methods = appMap[ temp.app ][ temp.system ]
+    temp.config = SDKConfig[ temp.app ][ temp.system ] or {}
   else
     temp.app = 'web'
-    temp.methods = appMap.web
-  unless temp.methods
-    temp.methods = {}
-    console.warn "#{temp.app}没有#{temp.system or ''}配置"
+    temp.config = SDKConfig.web or {}
   temp
 
 base = exports.base = init()
